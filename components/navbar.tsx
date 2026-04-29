@@ -31,6 +31,12 @@ export function Navbar() {
           >
             Results
           </Link>
+          <Link
+            href="/demo"
+            className="rounded-lg bg-purple-100 px-3 py-1 text-purple-700 transition duration-200 hover:bg-purple-200 hover:text-purple-800"
+          >
+            Demo
+          </Link>
         </div>
       </nav>
     </header>

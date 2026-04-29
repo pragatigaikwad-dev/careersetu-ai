@@ -36,20 +36,16 @@ export async function POST(request: Request) {
       );
     }
 
-    // Try both GROQ_API_KEY and OPENAI_API_KEY for flexibility
-    const apiKey = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY;
+    // Use only GROQ_API_KEY
+    const apiKey = process.env.GROQ_API_KEY;
 
     if (!apiKey) {
-      console.error(`[${requestId}] Missing API keys. Available env vars:`, {
-        GROQ_API_KEY: !!process.env.GROQ_API_KEY,
-        OPENAI_API_KEY: !!process.env.OPENAI_API_KEY,
-      });
+      console.error(`[${requestId}] Missing GROQ_API_KEY`);
       return NextResponse.json(
         { 
-          error: "Missing API key. Please set GROQ_API_KEY or OPENAI_API_KEY in environment variables.",
+          error: "Missing GROQ_API_KEY. Please set GROQ_API_KEY in environment variables.",
           debug: {
             hasGroqKey: !!process.env.GROQ_API_KEY,
-            hasOpenAIKey: !!process.env.OPENAI_API_KEY,
           }
         },
         { status: 500 },
@@ -100,14 +96,51 @@ export async function POST(request: Request) {
 
     console.log(`[${requestId}] Sending request to Groq API:`, JSON.stringify(requestBody, null, 2));
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-    });
+    // Create AbortController for timeout handling
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8-second timeout
+
+    let response;
+    try {
+      response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId); // Clear timeout if fetch completes
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.error(`[${requestId}] Groq API request timed out after 8 seconds`);
+        return NextResponse.json(
+          {
+            error: "AI service temporarily unavailable. Please try again.",
+            debug: {
+              timeout: true,
+              requestId,
+            }
+          },
+          { status: 408 } // Request Timeout
+        );
+      }
+      
+      console.error(`[${requestId}] Groq API fetch error:`, error);
+      return NextResponse.json(
+        {
+          error: "Failed to connect to AI service. Please try again.",
+          debug: {
+            fetchError: error instanceof Error ? error.message : "Unknown error",
+            requestId,
+          }
+        },
+        { status: 500 }
+      );
+    }
 
     console.log(`[${requestId}] Groq API response status:`, response.status, response.statusText);
 
